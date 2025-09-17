@@ -21,7 +21,20 @@ $ wireguard-loop-go wg0
 
 This will create a loop device interface with the specified name. The interface operates entirely in userspace and doesn't require special privileges.
 
-When an interface is running, you may use [`wg(8)`](https://git.zx2c4.com/wireguard-tools/about/src/man/wg.8) to configure it.
+### UAPI Socket Location
+
+The UAPI socket (used by `wg` command) is created at:
+- **With XDG_RUNTIME_DIR**: `$XDG_RUNTIME_DIR/wireguard-loop/wg0.sock` (typically `/run/user/1000/wireguard-loop/wg0.sock`)
+- **Without XDG_RUNTIME_DIR**: `/tmp/wireguard-loop/wg0.sock`
+- **With WG_SOCKET_DIR env var**: `$WG_SOCKET_DIR/wg0.sock` (for custom locations)
+
+Since the standard `wg` tool looks for sockets in `/var/run/wireguard/`, you may need to create a symlink with sudo (which preserves your environment variables):
+```
+$ sudo mkdir -p /var/run/wireguard
+$ sudo ln -s $XDG_RUNTIME_DIR/wireguard-loop/wg0.sock /var/run/wireguard/wg0.sock
+```
+
+After this, you can use [`wg(8)`](https://git.zx2c4.com/wireguard-tools/about/src/man/wg.8) to configure the interface normally.
 
 To run with more logging you may set the environment variable `LOG_LEVEL=debug`.
 
