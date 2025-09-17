@@ -26,7 +26,15 @@ const (
 
 // socketDirectory is variable because it is modified by a linker
 // flag in wireguard-android.
-var socketDirectory = "/var/run/wireguard"
+// For wireguard-loop-go, we use a user-writable location by default
+var socketDirectory = func() string {
+	// Try XDG_RUNTIME_DIR first (standard for user runtime files)
+	if dir := os.Getenv("XDG_RUNTIME_DIR"); dir != "" {
+		return dir + "/wireguard-loop"
+	}
+	// Fall back to temp directory
+	return os.TempDir() + "/wireguard-loop"
+}()
 
 func sockPath(iface string) string {
 	return fmt.Sprintf("%s/%s.sock", socketDirectory, iface)

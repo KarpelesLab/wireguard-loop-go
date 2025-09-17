@@ -3,8 +3,8 @@
 package device
 
 import (
-	"golang.zx2c4.com/wireguard/conn"
-	"golang.zx2c4.com/wireguard/rwcancel"
+	"github.com/KarpelesLab/wireguard-loop-go/conn"
+	"github.com/KarpelesLab/wireguard-loop-go/rwcancel"
 )
 
 func (device *Device) startRouteListener(_ conn.Bind) (*rwcancel.RWCancel, error) {

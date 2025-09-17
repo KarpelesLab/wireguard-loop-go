@@ -12,7 +12,7 @@ import (
 	"net/netip"
 	"os"
 
-	"golang.zx2c4.com/wireguard/conn"
+	"github.com/KarpelesLab/wireguard-loop-go/conn"
 )
 
 type ChannelBind struct {

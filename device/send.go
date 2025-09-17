@@ -16,8 +16,8 @@ import (
 	"golang.org/x/crypto/chacha20poly1305"
 	"golang.org/x/net/ipv4"
 	"golang.org/x/net/ipv6"
-	"golang.zx2c4.com/wireguard/conn"
-	"golang.zx2c4.com/wireguard/tun"
+	"github.com/KarpelesLab/wireguard-loop-go/conn"
+	"github.com/KarpelesLab/wireguard-loop-go/tun"
 )
 
 /* Outbound flow

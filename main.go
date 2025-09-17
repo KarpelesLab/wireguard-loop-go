@@ -15,10 +15,10 @@ import (
 	"strconv"
 
 	"golang.org/x/sys/unix"
-	"golang.zx2c4.com/wireguard/conn"
-	"golang.zx2c4.com/wireguard/device"
-	"golang.zx2c4.com/wireguard/ipc"
-	"golang.zx2c4.com/wireguard/tun"
+	"github.com/KarpelesLab/wireguard-loop-go/conn"
+	"github.com/KarpelesLab/wireguard-loop-go/device"
+	"github.com/KarpelesLab/wireguard-loop-go/ipc"
+	"github.com/KarpelesLab/wireguard-loop-go/loop"
 )
 
 const (
@@ -27,7 +27,6 @@ const (
 )
 
 const (
-	ENV_WG_TUN_FD             = "WG_TUN_FD"
 	ENV_WG_UAPI_FD            = "WG_UAPI_FD"
 	ENV_WG_PROCESS_FOREGROUND = "WG_PROCESS_FOREGROUND"
 )
@@ -37,29 +36,14 @@ func printUsage() {
 }
 
 func warning() {
-	switch runtime.GOOS {
-	case "linux", "freebsd", "openbsd":
-		if os.Getenv(ENV_WG_PROCESS_FOREGROUND) == "1" {
-			return
-		}
-	default:
-		return
-	}
-
-	fmt.Fprintln(os.Stderr, "┌──────────────────────────────────────────────────────┐")
-	fmt.Fprintln(os.Stderr, "│                                                      │")
-	fmt.Fprintln(os.Stderr, "│   Running wireguard-go is not required because this  │")
-	fmt.Fprintln(os.Stderr, "│   kernel has first class support for WireGuard. For  │")
-	fmt.Fprintln(os.Stderr, "│   information on installing the kernel module,       │")
-	fmt.Fprintln(os.Stderr, "│   please visit:                                      │")
-	fmt.Fprintln(os.Stderr, "│         https://www.wireguard.com/install/           │")
-	fmt.Fprintln(os.Stderr, "│                                                      │")
-	fmt.Fprintln(os.Stderr, "└──────────────────────────────────────────────────────┘")
+	// No warning needed for wireguard-loop-go since it serves a different purpose
+	// (loop device testing rather than replacing kernel module)
+	return
 }
 
 func main() {
 	if len(os.Args) == 2 && os.Args[1] == "--version" {
-		fmt.Printf("wireguard-go v%s\n\nUserspace WireGuard daemon for %s-%s.\nInformation available at https://www.wireguard.com.\nCopyright (C) Jason A. Donenfeld <Jason@zx2c4.com>.\n", Version, runtime.GOOS, runtime.GOARCH)
+		fmt.Printf("wireguard-loop-go v%s\n\nLoop-based WireGuard daemon for %s-%s.\nBased on wireguard-go by Jason A. Donenfeld.\n", Version, runtime.GOOS, runtime.GOARCH)
 		return
 	}
 
@@ -109,29 +93,9 @@ func main() {
 		return device.LogLevelError
 	}()
 
-	// open TUN device (or use supplied fd)
+	// create loop device (no need for TUN_FD anymore)
 
-	tdev, err := func() (tun.Device, error) {
-		tunFdStr := os.Getenv(ENV_WG_TUN_FD)
-		if tunFdStr == "" {
-			return tun.CreateTUN(interfaceName, device.DefaultMTU)
-		}
-
-		// construct tun device from supplied fd
-
-		fd, err := strconv.ParseUint(tunFdStr, 10, 32)
-		if err != nil {
-			return nil, err
-		}
-
-		err = unix.SetNonblock(int(fd), true)
-		if err != nil {
-			return nil, err
-		}
-
-		file := os.NewFile(uintptr(fd), "")
-		return tun.CreateTUNFromFile(file, device.DefaultMTU)
-	}()
+	tdev, err := loop.CreateLoop(interfaceName, device.DefaultMTU)
 
 	if err == nil {
 		realInterfaceName, err2 := tdev.Name()
@@ -145,10 +109,10 @@ func main() {
 		fmt.Sprintf("(%s) ", interfaceName),
 	)
 
-	logger.Verbosef("Starting wireguard-go version %s", Version)
+	logger.Verbosef("Starting wireguard-loop-go version %s", Version)
 
 	if err != nil {
-		logger.Errorf("Failed to create TUN device: %v", err)
+		logger.Errorf("Failed to create loop device: %v", err)
 		os.Exit(ExitSetupFailed)
 	}
 
@@ -174,12 +138,12 @@ func main() {
 		os.Exit(ExitSetupFailed)
 		return
 	}
+
 	// daemonize the process
 
 	if !foreground {
 		env := os.Environ()
-		env = append(env, fmt.Sprintf("%s=3", ENV_WG_TUN_FD))
-		env = append(env, fmt.Sprintf("%s=4", ENV_WG_UAPI_FD))
+		env = append(env, fmt.Sprintf("%s=3", ENV_WG_UAPI_FD))
 		env = append(env, fmt.Sprintf("%s=1", ENV_WG_PROCESS_FOREGROUND))
 		files := [3]*os.File{}
 		if os.Getenv("LOG_LEVEL") != "" && logLevel != device.LogLevelSilent {
@@ -196,7 +160,6 @@ func main() {
 				files[0], // stdin
 				files[1], // stdout
 				files[2], // stderr
-				tdev.File(),
 				fileUAPI,
 			},
 			Dir: ".",

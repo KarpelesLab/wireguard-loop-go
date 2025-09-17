@@ -10,8 +10,8 @@ import (
 	"encoding/binary"
 	"testing"
 
-	"golang.zx2c4.com/wireguard/conn"
-	"golang.zx2c4.com/wireguard/tun/tuntest"
+	"github.com/KarpelesLab/wireguard-loop-go/conn"
+	"github.com/KarpelesLab/wireguard-loop-go/tun/tuntest"
 )
 
 func TestCurveWrappers(t *testing.T) {
