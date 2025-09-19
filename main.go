@@ -9,6 +9,7 @@ package main
 
 import (
 	"fmt"
+	"net"
 	"os"
 	"os/signal"
 	"runtime"
@@ -28,6 +29,7 @@ const (
 
 const (
 	ENV_WG_UAPI_FD            = "WG_UAPI_FD"
+	ENV_WG_UAPI_EP_FD         = "WG_UAPI_EP_FD"
 	ENV_WG_PROCESS_FOREGROUND = "WG_PROCESS_FOREGROUND"
 )
 
@@ -118,30 +120,45 @@ func main() {
 
 	// open UAPI file (or use supplied fd)
 
-	fileUAPI, err := func() (*os.File, error) {
-		uapiFdStr := os.Getenv(ENV_WG_UAPI_FD)
-		if uapiFdStr == "" {
-			return ipc.UAPIOpen(interfaceName)
+	var fileUAPI *os.File
+	var isEndpointFd bool
+
+	// Check for connected endpoint fd first
+	if uapiEpFdStr := os.Getenv(ENV_WG_UAPI_EP_FD); uapiEpFdStr != "" {
+		fd, err := strconv.ParseUint(uapiEpFdStr, 10, 32)
+		if err != nil {
+			logger.Errorf("Invalid WG_UAPI_EP_FD: %v", err)
+			os.Exit(ExitSetupFailed)
+			return
 		}
-
-		// use supplied fd
-
+		fileUAPI = os.NewFile(uintptr(fd), "")
+		isEndpointFd = true
+	} else if uapiFdStr := os.Getenv(ENV_WG_UAPI_FD); uapiFdStr != "" {
+		// use supplied listener fd
 		fd, err := strconv.ParseUint(uapiFdStr, 10, 32)
 		if err != nil {
-			return nil, err
+			logger.Errorf("Invalid WG_UAPI_FD: %v", err)
+			os.Exit(ExitSetupFailed)
+			return
 		}
-
-		return os.NewFile(uintptr(fd), ""), nil
-	}()
-	if err != nil {
-		logger.Errorf("UAPI listen error: %v", err)
-		os.Exit(ExitSetupFailed)
-		return
+		fileUAPI = os.NewFile(uintptr(fd), "")
+		isEndpointFd = false
+	} else {
+		// create new listener
+		var err error
+		fileUAPI, err = ipc.UAPIOpen(interfaceName)
+		if err != nil {
+			logger.Errorf("UAPI listen error: %v", err)
+			os.Exit(ExitSetupFailed)
+			return
+		}
+		isEndpointFd = false
 	}
 
 	// daemonize the process
 
-	if !foreground {
+	if !foreground && !isEndpointFd {
+		// Don't daemonize if we're using an endpoint fd
 		env := os.Environ()
 		env = append(env, fmt.Sprintf("%s=3", ENV_WG_UAPI_FD))
 		env = append(env, fmt.Sprintf("%s=1", ENV_WG_PROCESS_FOREGROUND))
@@ -192,24 +209,45 @@ func main() {
 	errs := make(chan error)
 	term := make(chan os.Signal, 1)
 
-	uapi, err := ipc.UAPIListen(interfaceName, fileUAPI)
-	if err != nil {
-		logger.Errorf("Failed to listen on uapi socket: %v", err)
-		os.Exit(ExitSetupFailed)
-	}
+	if isEndpointFd {
+		// Handle single connected socket endpoint
+		logger.Verbosef("Using connected endpoint socket")
 
-	go func() {
-		for {
-			conn, err := uapi.Accept()
-			if err != nil {
-				errs <- err
-				return
-			}
-			go device.IpcHandle(conn)
+		// Create a net.Conn from the file descriptor
+		conn, err := net.FileConn(fileUAPI)
+		if err != nil {
+			logger.Errorf("Failed to create connection from endpoint fd: %v", err)
+			os.Exit(ExitSetupFailed)
 		}
-	}()
 
-	logger.Verbosef("UAPI listener started")
+		// Handle the single connection in a goroutine
+		go func() {
+			device.IpcHandle(conn)
+			// When connection closes, signal exit
+			errs <- fmt.Errorf("endpoint connection closed")
+		}()
+	} else {
+		// Handle listener socket (existing behavior)
+		uapi, err := ipc.UAPIListen(interfaceName, fileUAPI)
+		if err != nil {
+			logger.Errorf("Failed to listen on uapi socket: %v", err)
+			os.Exit(ExitSetupFailed)
+		}
+		defer uapi.Close()
+
+		go func() {
+			for {
+				conn, err := uapi.Accept()
+				if err != nil {
+					errs <- err
+					return
+				}
+				go device.IpcHandle(conn)
+			}
+		}()
+
+		logger.Verbosef("UAPI listener started")
+	}
 
 	// wait for program to terminate
 
@@ -218,13 +256,15 @@ func main() {
 
 	select {
 	case <-term:
-	case <-errs:
+	case err := <-errs:
+		if isEndpointFd {
+			logger.Verbosef("Endpoint closed: %v", err)
+		}
 	case <-device.Wait():
 	}
 
 	// clean up
 
-	uapi.Close()
 	device.Close()
 
 	logger.Verbosef("Shutting down")
