@@ -31,13 +31,18 @@ func CreateLoop(name string, mtu int) (tun.Device, error) {
 		mtu = DefaultMTU
 	}
 
-	return &Device{
+	d := &Device{
 		events:   make(chan tun.Event, 10),
 		closed:   make(chan struct{}),
 		mtu:      mtu,
 		name:     name,
 		incoming: make(chan [][]byte, 128000),
-	}, nil
+	}
+
+	// Send EventUp to signal the device is ready
+	d.events <- tun.EventUp
+
+	return d, nil
 }
 
 func (d *Device) File() *os.File {
